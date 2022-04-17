@@ -1,14 +1,18 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"html/template"
 	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
+	"os/signal"
+	"strconv"
 	"strings"
-	
+
 	bt "github.com/pratikdeoghare/brashtag"
 )
 
@@ -19,55 +23,151 @@ var (
 type card struct {
 	front string
 	back  string
+	score int
 }
 
-type deck []card
+type deck struct {
+	cards []card
+	curr  int
+}
 
-func (d deck) handler(w http.ResponseWriter, _ *http.Request) {
-	type htmlCard struct {
+func (d *deck) Curr() int {
+	return d.curr
+}
+
+func (d *deck) Score(x int) {
+	fmt.Println(d.curr, x)
+	d.cards[d.curr].score += x
+}
+
+func (d *deck) Next() card {
+	d.curr = rand.Intn(len(d.cards))
+	fmt.Println(d.curr, "next")
+	return d.cards[d.curr]
+}
+
+func (d *deck) handler(w http.ResponseWriter, r *http.Request) {
+	log.Println(r.URL.Path)
+	if d.curr != -1 {
+		switch r.URL.Path {
+		case "/good":
+			d.Score(1)
+		case "/bad":
+			d.Score(-1)
+		}
+	}
+
+	card := d.Next()
+
+	c := struct {
 		Front template.HTML
 		Back  template.HTML
-	}
-	
-	card := d[rand.Intn(len(d))]
-	
-	c := htmlCard{
+	}{
 		Front: template.HTML(card.front),
 		Back:  template.HTML(card.back),
 	}
-	
+
 	err := cardTmpl.Execute(w, c)
 	if err != nil {
 		log.Fatal(err)
 	}
-	
+
 }
 
 func main() {
-	text, err := ioutil.ReadFile("./cards.bt")
+	var cards string
+	flag.StringVar(&cards, "cards", "", "name of file with cards")
+	flag.Parse()
+
+	text, err := ioutil.ReadFile(cards)
 	if err != nil {
 		panic(err)
 	}
-	
+
 	tree, err := bt.Parse(string(text))
 	if err != nil {
 		panic(err)
 	}
-	
+
 	var d deck
+	d.curr = -1
 	for _, kid := range tree.(bt.Bag).Kids() {
 		switch x := kid.(type) {
 		case bt.Bag:
-			d = append(d, makeCard(x))
+			d.cards = append(d.cards, makeCard(x))
 		}
 	}
-	
+	fmt.Println("total cards: ", len(d.cards))
+
+	dumpScores := func() {
+		i := 0
+		for _, kid := range tree.(bt.Bag).Kids() {
+			switch x := kid.(type) {
+			case bt.Bag:
+				SetKid(x, "score", fmt.Sprint(d.cards[i].score))
+				i++
+			}
+		}
+
+		var text []string
+		for _, kid := range tree.(bt.Bag).Kids() {
+			text = append(text, kid.String())
+		}
+
+		err := ioutil.WriteFile(cards, []byte(strings.Join(text, "")), 0644)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		for range c {
+			dumpScores()
+			os.Exit(0)
+		}
+	}()
+
 	http.HandleFunc("/", d.handler)
+	http.HandleFunc("/favicon.ico", noop)
 	log.Fatal(http.ListenAndServe(":8080", nil))
+
+}
+
+func noop(w http.ResponseWriter, r *http.Request) {
+
+}
+
+func getBags(x bt.Bag, tags ...string) []int {
+	var bags []int
+	for i, k := range x.Kids() {
+		switch a := k.(type) {
+		case bt.Bag:
+			for _, tag := range tags {
+				if a.Tag() == tag {
+					bags = append(bags, i)
+					break
+				}
+			}
+		}
+	}
+	return bags
+}
+
+func SetKid(x bt.Bag, path string, val string) {
+	bags := getBags(x, "score")
+	for _, bag := range bags {
+		x.RemoveKid(bag)
+	}
+
+	x.AddKids(bt.NewBag(path, bt.NewBlob(val)))
 }
 
 func makeCard(t bt.Bag) card {
 	var front []string
+	var b bt.Bag
+loop:
 	for _, kid := range t.Kids() {
 		switch x := kid.(type) {
 		case bt.Blob:
@@ -75,12 +175,13 @@ func makeCard(t bt.Bag) card {
 		case bt.Code:
 			front = append(front, code(x))
 		case bt.Bag:
-			t = x
+			b = x
+			break loop
 		}
 	}
-	
+
 	var back []string
-	for _, kid := range t.Kids() {
+	for _, kid := range b.Kids() {
 		switch x := kid.(type) {
 		case bt.Code:
 			back = append(back, code(x))
@@ -88,15 +189,39 @@ func makeCard(t bt.Bag) card {
 			back = append(back, x.Text())
 		}
 	}
-	
+
+	score := 0
+	bags := getBags(t, "score")
+	if len(bags) != 0 {
+		score = parseScore(t.Kids()[bags[0]].(bt.Bag))
+	}
+
 	return card{
 		front: strings.Join(front, ""),
 		back:  strings.Join(back, ""),
+		score: score,
 	}
 }
 
+func parseScore(t bt.Bag) int {
+	s := ""
+	for _, k := range t.Kids() {
+		switch k.(type) {
+		case bt.Blob:
+			s += k.String()
+		}
+	}
+
+	s = strings.TrimSpace(s)
+	fmt.Println(s)
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 func code(x bt.Code) string {
-	
 	// for math
 	trimmed := strings.TrimSpace(x.Text())
 	if trimmed != "" {
@@ -104,7 +229,7 @@ func code(x bt.Code) string {
 			return x.Text()
 		}
 	}
-	
+
 	if len(x.Tag()) == 1 {
 		return fmt.Sprintf("<code>%s</code>", x.Text())
 	}

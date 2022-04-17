@@ -18,6 +18,9 @@
             padding: 20px;
             display: none;
         }
+        body{
+            background: #ffffe4;
+        }
     </style>
     <script>
         showBack = () => {
@@ -34,12 +37,17 @@
 </head>
 <body>
 <div class="card">
+    <a href="/good">Good</a>
+    <a href="/bad">Bad</a>
+    <a onclick="showBack()" href="#">Show</a>
+
     <div class="front" onclick="showBack()">
         {{.Front}}
     </div>
     <div class="back">
         {{.Back}}
     </div>
+
 </div>
 </body>
 </html>
