@@ -6,10 +6,10 @@ import (
 	"html/template"
 	"io/ioutil"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -29,10 +29,17 @@ type card struct {
 type deck struct {
 	cards []card
 	curr  int
+	perm  []int
 }
 
-func (d *deck) Curr() int {
-	return d.curr
+func (d *deck) Build() {
+	var scores []int
+	for _, c := range d.cards {
+		scores = append(scores, c.score)
+	}
+	w := newWeights(scores)
+	sort.Sort(w)
+	d.perm = w.idx
 }
 
 func (d *deck) Score(x int) {
@@ -41,9 +48,8 @@ func (d *deck) Score(x int) {
 }
 
 func (d *deck) Next() card {
-	d.curr = rand.Intn(len(d.cards))
-	fmt.Println(d.curr, "next")
-	return d.cards[d.curr]
+	d.curr = (d.curr + 1) % len(d.perm)
+	return d.cards[d.perm[d.curr]]
 }
 
 func (d *deck) handler(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +80,36 @@ func (d *deck) handler(w http.ResponseWriter, r *http.Request) {
 
 }
 
+type weights struct {
+	ws  []int
+	idx []int
+}
+
+func newWeights(ws []int) weights {
+	idx := make([]int, len(ws))
+	for i := 0; i < len(ws); i++ {
+		idx[i] = i
+	}
+	return weights{
+		ws:  ws,
+		idx: idx,
+	}
+}
+
+func (w weights) Len() int {
+	return len(w.ws)
+}
+
+func (w weights) Less(i, j int) bool {
+	return w.ws[w.idx[i]] < w.ws[w.idx[j]]
+}
+
+func (w weights) Swap(i, j int) {
+	w.idx[i], w.idx[j] = w.idx[j], w.idx[i]
+}
+
+var _ sort.Interface = &weights{}
+
 func main() {
 	var cards string
 	flag.StringVar(&cards, "cards", "", "name of file with cards")
@@ -98,6 +134,7 @@ func main() {
 		}
 	}
 	fmt.Println("total cards: ", len(d.cards))
+	d.Build()
 
 	dumpScores := func() {
 		i := 0

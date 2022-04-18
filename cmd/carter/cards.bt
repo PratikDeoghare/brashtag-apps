@@ -3,7 +3,7 @@
    #{
       `$\frac{n (n + 1)}{2}$`
    }
-#score{0}}
+#score{1}}
 
 #{
     What is Euclid's algorithm to calculate `gcd`?
@@ -24,7 +24,7 @@
         <img src="https://upload.wikimedia.org/wikipedia/commons/3/37/Euclid%27s_algorithm_Book_VII_Proposition_2_3.png"/>
     }
 
-#score{1}}
+#score{2}}
 
 #{
     What is full form or HTTP?
